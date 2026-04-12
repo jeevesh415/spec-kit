@@ -24,6 +24,9 @@ specify extension search  # Now uses your organization's catalog instead of the 
 
 ### Community Reference Catalog (`catalog.community.json`)
 
+> [!NOTE]
+> Community extensions are independently created and maintained by their respective authors. GitHub and the Spec Kit maintainers may review pull requests that add entries to the community catalog for formatting, catalog structure, or policy compliance, but they do **not review, audit, endorse, or support the extension code itself**. Review extension source code before installation and use at your own discretion.
+
 - **Purpose**: Browse available community-contributed extensions
 - **Status**: Active - contains extensions submitted by the community
 - **Location**: `extensions/catalog.community.json`
@@ -59,7 +62,7 @@ Populate your `catalog.json` with approved extensions:
 Skip catalog curation - team members install directly using URLs:
 
 ```bash
-specify extension add --from https://github.com/org/spec-kit-ext/archive/refs/tags/v1.0.0.zip
+specify extension add <extension-name> --from https://github.com/org/spec-kit-ext/archive/refs/tags/v1.0.0.zip
 ```
 
 **Benefits**: Quick for one-off testing or private extensions
@@ -68,30 +71,14 @@ specify extension add --from https://github.com/org/spec-kit-ext/archive/refs/ta
 
 ## Available Community Extensions
 
-The following community-contributed extensions are available in [`catalog.community.json`](catalog.community.json):
+> [!NOTE]
+> Community extensions are independently created and maintained by their respective authors. GitHub and the Spec Kit maintainers may review pull requests that add entries to the community catalog for formatting, catalog structure, or policy compliance, but they do **not review, audit, endorse, or support the extension code itself**. The Community Extensions website is also a third-party resource. Review extension source code before installation and use at your own discretion.
 
-| Extension | Purpose | URL |
-|-----------|---------|-----|
-| Archive Extension | Archive merged features into main project memory. | [spec-kit-archive](https://github.com/stn1slv/spec-kit-archive) |
-| Azure DevOps Integration | Sync user stories and tasks to Azure DevOps work items using OAuth authentication | [spec-kit-azure-devops](https://github.com/pragya247/spec-kit-azure-devops) |
-| Cleanup Extension | Post-implementation quality gate that reviews changes, fixes small issues (scout rule), creates tasks for medium issues, and generates analysis for large issues | [spec-kit-cleanup](https://github.com/dsrednicki/spec-kit-cleanup) |
-| Cognitive Squad | Multi-agent cognitive system with Triadic Model: understanding, internalization, application — with quality gates, backpropagation verification, and self-healing | [cognitive-squad](https://github.com/Testimonial/cognitive-squad) |
-| DocGuard — CDD Enforcement | Canonical-Driven Development enforcement. Validates, scores, and traces project documentation with automated checks, AI-driven workflows, and spec-kit hooks. Zero NPM runtime dependencies. | [spec-kit-docguard](https://github.com/raccioly/docguard) |
-| Fleet Orchestrator | Orchestrate a full feature lifecycle with human-in-the-loop gates across all SpecKit phases | [spec-kit-fleet](https://github.com/sharathsatish/spec-kit-fleet) |
-| Iterate | Iterate on spec documents with a two-phase define-and-apply workflow — refine specs mid-implementation and go straight back to building | [spec-kit-iterate](https://github.com/imviancagrace/spec-kit-iterate) |
-| Jira Integration | Create Jira Epics, Stories, and Issues from spec-kit specifications and task breakdowns with configurable hierarchy and custom field support | [spec-kit-jira](https://github.com/mbachorik/spec-kit-jira) |
-| Learning Extension | Generate educational guides from implementations and enhance clarifications with mentoring context | [spec-kit-learn](https://github.com/imviancagrace/spec-kit-learn) |
-| Project Health Check | Diagnose a Spec Kit project and report health issues across structure, agents, features, scripts, extensions, and git | [spec-kit-doctor](https://github.com/KhawarHabibKhan/spec-kit-doctor) |
-| Project Status | Show current SDD workflow progress — active feature, artifact status, task completion, workflow phase, and extensions summary | [spec-kit-status](https://github.com/KhawarHabibKhan/spec-kit-status) |
-| Ralph Loop | Autonomous implementation loop using AI agent CLI | [spec-kit-ralph](https://github.com/Rubiss/spec-kit-ralph) |
-| Reconcile Extension | Reconcile implementation drift by surgically updating feature artifacts. | [spec-kit-reconcile](https://github.com/stn1slv/spec-kit-reconcile) |
-| Retrospective Extension | Post-implementation retrospective with spec adherence scoring, drift analysis, and human-gated spec updates | [spec-kit-retrospective](https://github.com/emi-dm/spec-kit-retrospective) |
-| Review Extension | Post-implementation comprehensive code review with specialized agents for code quality, comments, tests, error handling, type design, and simplification | [spec-kit-review](https://github.com/ismaelJimenez/spec-kit-review) |
-| SDD Utilities | Resume interrupted workflows, validate project health, and verify spec-to-task traceability | [speckit-utils](https://github.com/mvanhorn/speckit-utils) |
-| Spec Sync | Detect and resolve drift between specs and implementation. AI-assisted resolution with human approval | [spec-kit-sync](https://github.com/bgervin/spec-kit-sync) |
-| Understanding | Automated requirements quality analysis — 31 deterministic metrics against IEEE/ISO standards with experimental energy-based ambiguity detection | [understanding](https://github.com/Testimonial/understanding) |
-| V-Model Extension Pack | Enforces V-Model paired generation of development specs and test specs with full traceability | [spec-kit-v-model](https://github.com/leocamello/spec-kit-v-model) |
-| Verify Extension | Post-implementation quality gate that validates implemented code against specification artifacts | [spec-kit-verify](https://github.com/ismaelJimenez/spec-kit-verify) |
+🔍 **Browse and search community extensions on the [Community Extensions website](https://speckit-community.github.io/extensions/).**
+
+See the [Community Extensions](../README.md#-community-extensions) section in the main README for the full list of available community-contributed extensions.
+
+For the raw catalog data, see [`catalog.community.json`](catalog.community.json).
 
 
 ## Adding Your Extension
@@ -129,7 +116,7 @@ specify extension search                  # See what's in your catalog
 specify extension add <extension-name>    # Install by name
 
 # Direct from URL (bypasses catalog)
-specify extension add --from https://github.com/<org>/<repo>/archive/refs/tags/<version>.zip
+specify extension add <extension-name> --from https://github.com/<org>/<repo>/archive/refs/tags/<version>.zip
 
 # List installed extensions
 specify extension list

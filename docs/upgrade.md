@@ -8,7 +8,7 @@
 
 | What to Upgrade | Command | When to Use |
 |----------------|---------|-------------|
-| **CLI Tool Only** | `uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git` | Get latest CLI features without touching project files |
+| **CLI Tool Only** | `uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@vX.Y.Z` | Get latest CLI features without touching project files |
 | **Project Files** | `specify init --here --force --ai <your-agent>` | Update slash commands, templates, and scripts in your project |
 | **Both** | Run CLI upgrade, then project update | Recommended for major version updates |
 
@@ -20,16 +20,18 @@ The CLI tool (`specify`) is separate from your project files. Upgrade it to get 
 
 ### If you installed with `uv tool install`
 
+Upgrade to a specific release (check [Releases](https://github.com/github/spec-kit/releases) for the latest tag):
+
 ```bash
-uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git
+uv tool install specify-cli --force --from git+https://github.com/github/spec-kit.git@vX.Y.Z
 ```
 
 ### If you use one-shot `uvx` commands
 
-No upgrade needed—`uvx` always fetches the latest version. Just run your commands as normal:
+Specify the desired release tag:
 
 ```bash
-uvx --from git+https://github.com/github/spec-kit.git specify init --here --ai copilot
+uvx --from git+https://github.com/github/spec-kit.git@vX.Y.Z specify init --here --ai copilot
 ```
 
 ### Verify the upgrade
@@ -290,7 +292,7 @@ This tells Spec Kit which feature directory to use when creating specs, plans, a
    ```bash
    ls -la .claude/commands/      # Claude Code
    ls -la .gemini/commands/      # Gemini
-   ls -la .cursor/commands/      # Cursor
+   ls -la .cursor/skills/      # Cursor
    ls -la .pi/prompts/           # Pi Coding Agent
    ```
 

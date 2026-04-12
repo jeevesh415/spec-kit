@@ -41,7 +41,7 @@ provides:
     - name: "speckit.my-ext.hello"      # Must follow pattern: speckit.{ext-id}.{cmd}
       file: "commands/hello.md"
       description: "Say hello"
-      aliases: ["speckit.hello"]        # Optional aliases
+      aliases: ["speckit.my-ext.hi"]    # Optional aliases, same pattern
 
   config:                               # Optional: Config files
     - name: "my-ext-config.yml"
@@ -177,16 +177,16 @@ Compatibility requirements.
 
 What the extension provides.
 
-**Required sub-fields**:
+**Optional sub-fields**:
 
-- `commands`: Array of command objects (must have at least one)
+- `commands`: Array of command objects (at least one command or hook is required)
 
 **Command object**:
 
 - `name`: Command name (must match `speckit.{ext-id}.{command}`)
 - `file`: Path to command file (relative to extension root)
 - `description`: Command description (optional)
-- `aliases`: Alternative command names (optional, array)
+- `aliases`: Alternative command names (optional, array; each must match `speckit.{ext-id}.{command}`)
 
 ### Optional Fields
 
@@ -196,12 +196,19 @@ Integration hooks for automatic execution.
 
 Available hook points:
 
-- `after_tasks`: After `/speckit.tasks` completes
-- `after_implement`: After `/speckit.implement` completes (future)
+- `before_specify` / `after_specify`: Before/after specification generation
+- `before_plan` / `after_plan`: Before/after implementation planning
+- `before_tasks` / `after_tasks`: Before/after task generation
+- `before_implement` / `after_implement`: Before/after implementation
+- `before_analyze` / `after_analyze`: Before/after cross-artifact analysis
+- `before_checklist` / `after_checklist`: Before/after checklist generation
+- `before_clarify` / `after_clarify`: Before/after spec clarification
+- `before_constitution` / `after_constitution`: Before/after constitution update
+- `before_taskstoissues` / `after_taskstoissues`: Before/after tasks-to-issues conversion
 
 Hook object:
 
-- `command`: Command to execute (must be in `provides.commands`)
+- `command`: Command to execute (typically from `provides.commands`, but can reference any registered command)
 - `optional`: If true, prompt user before executing
 - `prompt`: Prompt text for optional hooks
 - `description`: Hook description
@@ -514,7 +521,7 @@ zip -r spec-kit-my-ext-1.0.0.zip extension.yml commands/ scripts/ docs/
 Users install with:
 
 ```bash
-specify extension add --from https://github.com/.../spec-kit-my-ext-1.0.0.zip
+specify extension add <extension-name> --from https://github.com/.../spec-kit-my-ext-1.0.0.zip
 ```
 
 ### Option 3: Community Reference Catalog
@@ -523,7 +530,7 @@ Submit to the community catalog for public discovery:
 
 1. **Fork** spec-kit repository
 2. **Add entry** to `extensions/catalog.community.json`
-3. **Update** `extensions/README.md` with your extension
+3. **Update** the Community Extensions table in `README.md` with your extension
 4. **Create PR** following the [Extension Publishing Guide](EXTENSION-PUBLISHING-GUIDE.md)
 5. **After merge**, your extension becomes available:
    - Users can browse `catalog.community.json` to discover your extension

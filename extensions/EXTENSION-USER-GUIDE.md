@@ -160,7 +160,7 @@ This will:
 
 ```bash
 # From GitHub release
-specify extension add --from https://github.com/org/spec-kit-ext/archive/refs/tags/v1.0.0.zip
+specify extension add <extension-name> --from https://github.com/org/spec-kit-ext/archive/refs/tags/v1.0.0.zip
 ```
 
 ### Install from Local Directory (Development)
@@ -187,6 +187,21 @@ Provided commands:
    Check: .specify/extensions/jira/
 ```
 
+### Automatic Agent Skill Registration
+
+If your project was initialized with `--ai-skills`, extension commands are **automatically registered as agent skills** during installation. This ensures that extensions are discoverable by agents that use the [agentskills.io](https://agentskills.io) skill specification.
+
+```text
+✓ Extension installed successfully!
+
+Jira Integration (v1.0.0)
+  ...
+
+✓ 3 agent skill(s) auto-registered
+```
+
+When an extension is removed, its corresponding skills are also cleaned up automatically. Pre-existing skills that were manually customized are never overwritten.
+
 ---
 
 ## Using Extensions
@@ -199,8 +214,8 @@ Extensions add commands that appear in your AI agent (Claude Code):
 # In Claude Code
 > /speckit.jira.specstoissues
 
-# Or use short alias (if provided)
-> /speckit.specstoissues
+# Or use a namespaced alias (if provided)
+> /speckit.jira.sync
 ```
 
 ### Extension Configuration
@@ -388,8 +403,10 @@ settings:
 
 # Hook configuration
 # Available events: before_specify, after_specify, before_plan, after_plan,
-#                   before_tasks, after_tasks, before_implement, after_implement
-# Planned (not yet wired into core templates): before_commit, after_commit
+#                   before_tasks, after_tasks, before_implement, after_implement,
+#                   before_analyze, after_analyze, before_checklist, after_checklist,
+#                   before_clarify, after_clarify, before_constitution, after_constitution,
+#                   before_taskstoissues, after_taskstoissues
 hooks:
   after_tasks:
     - extension: jira
@@ -722,7 +739,7 @@ You can still install extensions not in your catalog using `--from`:
 specify extension add jira
 
 # Direct URL (bypasses catalog)
-specify extension add --from https://github.com/someone/spec-kit-ext/archive/v1.0.0.zip
+specify extension add <extension-name> --from https://github.com/someone/spec-kit-ext/archive/v1.0.0.zip
 
 # Local development
 specify extension add --dev /path/to/extension
@@ -792,7 +809,7 @@ specify extension add --dev /path/to/extension
 2. Install older version of extension:
 
    ```bash
-   specify extension add --from https://github.com/org/ext/archive/v1.0.0.zip
+   specify extension add <extension-name> --from https://github.com/org/ext/archive/v1.0.0.zip
    ```
 
 ### MCP Tool Not Available
