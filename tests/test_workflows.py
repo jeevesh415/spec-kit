@@ -54,7 +54,7 @@ workflow:
   description: "A test workflow"
 
 inputs:
-  feature_name:
+  spec:
     type: string
     required: true
   scope:
@@ -65,7 +65,7 @@ steps:
   - id: step-one
     command: speckit.specify
     input:
-      args: "{{ inputs.feature_name }}"
+      args: "{{ inputs.spec }}"
 
   - id: step-two
     command: speckit.plan
@@ -367,14 +367,48 @@ class TestBuildExecArgs:
         assert args[2] == "do stuff"
         assert "--json" in args
 
-    def test_copilot_exec_args(self):
+    def test_copilot_exec_args(self, monkeypatch):
+        monkeypatch.delenv("SPECKIT_COPILOT_ALLOW_ALL_TOOLS", raising=False)
+        monkeypatch.delenv("SPECKIT_ALLOW_ALL_TOOLS", raising=False)
         from specify_cli.integrations.copilot import CopilotIntegration
         impl = CopilotIntegration()
         args = impl.build_exec_args("do stuff", model="claude-sonnet-4-20250514")
         assert args[0] == "copilot"
         assert "-p" in args
-        assert "--allow-all-tools" in args
+        assert "--yolo" in args
         assert "--model" in args
+
+    def test_copilot_new_env_var_disables_yolo(self, monkeypatch):
+        monkeypatch.setenv("SPECKIT_COPILOT_ALLOW_ALL_TOOLS", "0")
+        monkeypatch.delenv("SPECKIT_ALLOW_ALL_TOOLS", raising=False)
+        from specify_cli.integrations.copilot import CopilotIntegration
+        impl = CopilotIntegration()
+        args = impl.build_exec_args("do stuff")
+        assert "--yolo" not in args
+
+    def test_copilot_deprecated_env_var_still_honoured(self, monkeypatch):
+        monkeypatch.delenv("SPECKIT_COPILOT_ALLOW_ALL_TOOLS", raising=False)
+        monkeypatch.setenv("SPECKIT_ALLOW_ALL_TOOLS", "0")
+        import warnings
+        from specify_cli.integrations.copilot import CopilotIntegration
+        impl = CopilotIntegration()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            args = impl.build_exec_args("do stuff")
+        assert "--yolo" not in args
+        assert any(
+            "SPECKIT_ALLOW_ALL_TOOLS is deprecated" in str(x.message)
+            and issubclass(x.category, UserWarning)
+            for x in w
+        )
+
+    def test_copilot_new_env_var_takes_precedence(self, monkeypatch):
+        monkeypatch.setenv("SPECKIT_COPILOT_ALLOW_ALL_TOOLS", "1")
+        monkeypatch.setenv("SPECKIT_ALLOW_ALL_TOOLS", "0")
+        from specify_cli.integrations.copilot import CopilotIntegration
+        impl = CopilotIntegration()
+        args = impl.build_exec_args("do stuff")
+        assert "--yolo" in args
 
     def test_ide_only_returns_none(self):
         from specify_cli.integrations.windsurf import WindsurfIntegration
@@ -400,6 +434,7 @@ class TestCommandStep:
     """Test the command step type."""
 
     def test_execute_basic(self):
+        from unittest.mock import patch
         from specify_cli.workflows.steps.command import CommandStep
         from specify_cli.workflows.base import StepContext, StepStatus
 
@@ -413,7 +448,8 @@ class TestCommandStep:
             "command": "speckit.specify",
             "input": {"args": "{{ inputs.name }}"},
         }
-        result = step.execute(config, ctx)
+        with patch("specify_cli.workflows.steps.command.shutil.which", return_value=None):
+            result = step.execute(config, ctx)
         assert result.status == StepStatus.FAILED
         assert result.output["command"] == "speckit.specify"
         assert result.output["integration"] == "claude"
@@ -474,6 +510,7 @@ class TestCommandStep:
 
     def test_dispatch_not_attempted_without_cli(self):
         """When the CLI tool is not installed, step should fail."""
+        from unittest.mock import patch
         from specify_cli.workflows.steps.command import CommandStep
         from specify_cli.workflows.base import StepContext, StepStatus
 
@@ -488,7 +525,8 @@ class TestCommandStep:
             "command": "speckit.specify",
             "input": {"args": "{{ inputs.name }}"},
         }
-        result = step.execute(config, ctx)
+        with patch("specify_cli.workflows.steps.command.shutil.which", return_value=None):
+            result = step.execute(config, ctx)
         assert result.status == StepStatus.FAILED
         assert result.output["dispatched"] is False
         assert result.error is not None
@@ -566,6 +604,7 @@ class TestPromptStep:
     """Test the prompt step type."""
 
     def test_execute_basic(self):
+        from unittest.mock import patch
         from specify_cli.workflows.steps.prompt import PromptStep
         from specify_cli.workflows.base import StepContext, StepStatus
 
@@ -579,7 +618,8 @@ class TestPromptStep:
             "type": "prompt",
             "prompt": "Review {{ inputs.file }} for security issues",
         }
-        result = step.execute(config, ctx)
+        with patch("specify_cli.workflows.steps.prompt.shutil.which", return_value=None):
+            result = step.execute(config, ctx)
         assert result.status == StepStatus.FAILED
         assert result.output["prompt"] == "Review auth.py for security issues"
         assert result.output["integration"] == "claude"
@@ -1152,8 +1192,8 @@ class TestWorkflowDefinition:
         from specify_cli.workflows.engine import WorkflowDefinition
 
         definition = WorkflowDefinition.from_string(sample_workflow_yaml)
-        assert "feature_name" in definition.inputs
-        assert definition.inputs["feature_name"]["required"] is True
+        assert "spec" in definition.inputs
+        assert definition.inputs["spec"]["required"] is True
         assert definition.inputs["scope"]["default"] == "full"
 
 
@@ -1311,6 +1351,7 @@ class TestWorkflowEngine:
             engine.load_workflow("nonexistent")
 
     def test_execute_simple_workflow(self, project_dir):
+        from unittest.mock import patch
         from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
         from specify_cli.workflows.base import RunStatus
 
@@ -1333,7 +1374,8 @@ steps:
 """
         definition = WorkflowDefinition.from_string(yaml_str)
         engine = WorkflowEngine(project_dir)
-        state = engine.execute(definition, {"name": "login"})
+        with patch("specify_cli.workflows.steps.command.shutil.which", return_value=None):
+            state = engine.execute(definition, {"name": "login"})
 
         assert state.status == RunStatus.FAILED
         assert "step-one" in state.step_results
@@ -1452,6 +1494,394 @@ steps:
 
         with pytest.raises(ValueError, match="Required input"):
             engine.execute(definition, {})
+
+    def test_integration_auto_default_uses_project_integration(self, project_dir):
+        """`integration: auto` should resolve to .specify/integration.json's integration."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        specify_dir = project_dir / ".specify"
+        specify_dir.mkdir(parents=True, exist_ok=True)
+        (specify_dir / "integration.json").write_text(
+            json.dumps({"integration": "opencode", "version": "0.7.4"}),
+            encoding="utf-8",
+        )
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-default"
+  name: "Auto Default"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {})
+        assert resolved["integration"] == "opencode"
+
+    def test_integration_auto_default_falls_back_when_no_integration_json(self, project_dir):
+        """`integration: auto` should keep the literal "auto" when project state is missing.
+
+        The engine itself must not invent an integration when
+        ``.specify/integration.json`` is absent; any later validation or
+        command resolution will handle an unresolved ``"auto"`` value.
+        """
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-fallback"
+  name: "Auto Fallback"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {})
+        assert resolved["integration"] == "auto"
+
+    def test_integration_explicit_input_overrides_auto(self, project_dir):
+        """An explicit --input integration=X must win over `auto` even when integration.json exists."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        specify_dir = project_dir / ".specify"
+        specify_dir.mkdir(parents=True, exist_ok=True)
+        (specify_dir / "integration.json").write_text(
+            json.dumps({"integration": "opencode"}),
+            encoding="utf-8",
+        )
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "explicit-wins"
+  name: "Explicit Wins"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {"integration": "claude"})
+        assert resolved["integration"] == "claude"
+
+    def test_integration_explicit_auto_resolves_like_default(self, project_dir):
+        """Passing ``integration=auto`` explicitly must resolve the sentinel,
+        not pass it through as a literal — the workflow prompt advertises
+        ``auto`` as a valid value, so the dispatch path must never see it.
+        """
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        specify_dir = project_dir / ".specify"
+        specify_dir.mkdir(parents=True, exist_ok=True)
+        (specify_dir / "integration.json").write_text(
+            json.dumps({"integration": "opencode"}),
+            encoding="utf-8",
+        )
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "explicit-auto"
+  name: "Explicit Auto"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {"integration": "auto"})
+        assert resolved["integration"] == "opencode"
+
+    def test_integration_auto_ignores_malformed_integration_json(self, project_dir):
+        """A malformed integration.json must not crash — fall back to the literal default."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        specify_dir = project_dir / ".specify"
+        specify_dir.mkdir(parents=True, exist_ok=True)
+        (specify_dir / "integration.json").write_text("{not json", encoding="utf-8")
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-malformed"
+  name: "Auto Malformed"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {})
+        assert resolved["integration"] == "auto"
+
+    def test_integration_auto_ignores_non_utf8_integration_json(self, project_dir):
+        """A non-UTF8 integration.json must not crash — fall back to the literal default."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        specify_dir = project_dir / ".specify"
+        specify_dir.mkdir(parents=True, exist_ok=True)
+        # 0xFF is invalid as the leading byte of a UTF-8 sequence, so
+        # ``Path.read_text(encoding="utf-8")`` raises UnicodeDecodeError.
+        (specify_dir / "integration.json").write_bytes(b"\xff\xfe\x00\x00")
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-non-utf8"
+  name: "Auto Non UTF-8"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {})
+        assert resolved["integration"] == "auto"
+
+    def test_integration_auto_resolves_modern_normalized_state(self, project_dir):
+        """`integration: auto` must resolve modern state files that record
+        ``default_integration`` / ``installed_integrations`` and omit the
+        legacy ``integration`` field."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        specify_dir = project_dir / ".specify"
+        specify_dir.mkdir(parents=True, exist_ok=True)
+        (specify_dir / "integration.json").write_text(
+            json.dumps(
+                {
+                    "version": "0.8.3",
+                    "integration_state_schema": 1,
+                    "default_integration": "claude",
+                    "installed_integrations": ["claude", "copilot"],
+                    "integration_settings": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-modern"
+  name: "Auto Modern"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {})
+        assert resolved["integration"] == "claude"
+
+    def test_integration_auto_rejects_future_state_schema(self, project_dir):
+        """`integration: auto` must not silently use a state file written by a newer
+        CLI (``integration_state_schema`` greater than the current supported value);
+        the resolver falls back to the literal default rather than guessing."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+        from specify_cli.integration_state import INTEGRATION_STATE_SCHEMA
+
+        specify_dir = project_dir / ".specify"
+        specify_dir.mkdir(parents=True, exist_ok=True)
+        (specify_dir / "integration.json").write_text(
+            json.dumps(
+                {
+                    "version": "99.0.0",
+                    "integration_state_schema": INTEGRATION_STATE_SCHEMA + 1,
+                    "default_integration": "claude",
+                    "installed_integrations": ["claude"],
+                    "integration_settings": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-future-schema"
+  name: "Auto Future Schema"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {})
+        assert resolved["integration"] == "auto"
+
+    def test_default_value_is_validated_against_enum(self, project_dir):
+        """Defaults must run through the same coercion/enum check as provided inputs."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "default-enum"
+  name: "Default Enum"
+  version: "1.0.0"
+inputs:
+  scope:
+    type: string
+    default: "not-in-enum"
+    enum: ["full", "backend-only", "frontend-only"]
+""")
+        engine = WorkflowEngine(project_dir)
+        with pytest.raises(ValueError, match="not in allowed values"):
+            engine._resolve_inputs(definition, {})
+
+    def test_default_value_is_coerced_to_declared_type(self, project_dir):
+        """A numeric default declared as a string should still be coerced like a provided input."""
+        from specify_cli.workflows.engine import WorkflowEngine, WorkflowDefinition
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "default-coerce"
+  name: "Default Coerce"
+  version: "1.0.0"
+inputs:
+  retries:
+    type: number
+    default: "3"
+""")
+        engine = WorkflowEngine(project_dir)
+        resolved = engine._resolve_inputs(definition, {})
+        assert resolved["retries"] == 3
+        assert isinstance(resolved["retries"], int)
+
+    def test_validate_workflow_rejects_invalid_default(self):
+        """Authoring-time validation should reject defaults that violate enum."""
+        from specify_cli.workflows.engine import WorkflowDefinition, validate_workflow
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "bad-default"
+  name: "Bad Default"
+  version: "1.0.0"
+inputs:
+  scope:
+    type: string
+    default: "not-in-enum"
+    enum: ["full", "backend-only", "frontend-only"]
+steps:
+  - id: noop
+    type: gate
+    message: "noop"
+    options: [approve]
+""")
+        errors = validate_workflow(definition)
+        assert any("invalid default" in e for e in errors), errors
+
+    def test_validate_workflow_exempts_integration_auto_sentinel(self):
+        """``integration: auto`` is a runtime-resolved sentinel and must not fail validation."""
+        from specify_cli.workflows.engine import WorkflowDefinition, validate_workflow
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-ok"
+  name: "Auto OK"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: string
+    default: "auto"
+    enum: ["copilot", "claude", "gemini"]
+steps:
+  - id: noop
+    type: gate
+    message: "noop"
+    options: [approve]
+""")
+        errors = validate_workflow(definition)
+        assert not any("invalid default" in e for e in errors), errors
+
+    def test_validate_workflow_still_checks_type_for_auto_sentinel(self):
+        """The ``auto`` exemption only skips enum-membership; declared type is still enforced."""
+        from specify_cli.workflows.engine import WorkflowDefinition, validate_workflow
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "auto-bad-type"
+  name: "Auto Bad Type"
+  version: "1.0.0"
+inputs:
+  integration:
+    type: number
+    default: "auto"
+steps:
+  - id: noop
+    type: gate
+    message: "noop"
+    options: [approve]
+""")
+        errors = validate_workflow(definition)
+        assert any("invalid default" in e for e in errors), errors
+
+    def test_validate_workflow_rejects_bool_default_for_number_type(self):
+        """``type: number`` paired with a bool default must fail — bool is a
+        subclass of int so ``float(True)`` would otherwise silently coerce
+        ``true`` to ``1``.
+        """
+        from specify_cli.workflows.engine import WorkflowDefinition, validate_workflow
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "bool-as-number"
+  name: "Bool As Number"
+  version: "1.0.0"
+inputs:
+  count:
+    type: number
+    default: true
+steps:
+  - id: noop
+    type: gate
+    message: "noop"
+    options: [approve]
+""")
+        errors = validate_workflow(definition)
+        assert any("invalid default" in e for e in errors), errors
+
+    def test_validate_workflow_rejects_non_string_default_for_string_type(self):
+        """``type: string`` must require an actual string — a numeric YAML
+        default like ``5`` would otherwise slip through unvalidated.
+        """
+        from specify_cli.workflows.engine import WorkflowDefinition, validate_workflow
+
+        definition = WorkflowDefinition.from_string("""
+schema_version: "1.0"
+workflow:
+  id: "number-as-string"
+  name: "Number As String"
+  version: "1.0.0"
+inputs:
+  label:
+    type: string
+    default: 5
+steps:
+  - id: noop
+    type: gate
+    message: "noop"
+    options: [approve]
+""")
+        errors = validate_workflow(definition)
+        assert any("invalid default" in e for e in errors), errors
 
 
 # ===== State Persistence Tests =====

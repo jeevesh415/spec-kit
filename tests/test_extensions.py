@@ -11,6 +11,7 @@ Tests cover:
 
 import pytest
 import json
+import platform
 import tempfile
 import shutil
 import tomllib
@@ -214,6 +215,43 @@ class TestExtensionManifest:
             yaml.dump({"schema_version": "1.0"}, f)  # Missing 'extension'
 
         with pytest.raises(ValidationError, match="Missing required field"):
+            ExtensionManifest(manifest_path)
+
+    def test_non_mapping_yaml_raises_validation_error(self, temp_dir):
+        """Manifest whose YAML root is a scalar or list raises ValidationError, not TypeError."""
+        manifest_path = temp_dir / "extension.yml"
+        for bad_content in ("42\n", "[]\n", "null\n"):
+            manifest_path.write_text(bad_content)
+            with pytest.raises(ValidationError, match="YAML mapping"):
+                ExtensionManifest(manifest_path)
+
+    def test_utf8_non_ascii_description_loads(self, temp_dir, valid_manifest_data):
+        """Regression for #2325: non-ASCII (UTF-8) description loads on any platform.
+
+        On Windows, Python's default text-mode encoding is the locale codepage
+        (e.g. cp1252/GBK), which raises UnicodeDecodeError on UTF-8 bytes
+        outside the ASCII range. The loader must open with encoding='utf-8'.
+        """
+        import yaml
+
+        valid_manifest_data["extension"]["description"] = "中文测试 — émojis 🚀"
+        manifest_path = temp_dir / "extension.yml"
+        # Write UTF-8 bytes explicitly so the test exercises the read path,
+        # not the (locale-dependent) write path.
+        manifest_path.write_bytes(
+            yaml.safe_dump(valid_manifest_data, allow_unicode=True).encode("utf-8")
+        )
+
+        manifest = ExtensionManifest(manifest_path)
+        assert manifest.description == "中文测试 — émojis 🚀"
+
+    def test_invalid_utf8_bytes_raises_validation_error(self, temp_dir):
+        """Negative case: file containing invalid UTF-8 bytes raises ValidationError, not raw UnicodeDecodeError."""
+        manifest_path = temp_dir / "extension.yml"
+        # 0xFF/0xFE are not valid UTF-8 lead bytes.
+        manifest_path.write_bytes(b"\xff\xfe not valid utf-8 \xff\n")
+
+        with pytest.raises(ValidationError, match="not valid UTF-8"):
             ExtensionManifest(manifest_path)
 
     def test_invalid_extension_id(self, temp_dir, valid_manifest_data):
@@ -1333,13 +1371,9 @@ description: "Scripted command"
 scripts:
   sh: ../../scripts/bash/setup-plan.sh --json "{ARGS}"
   ps: ../../scripts/powershell/setup-plan.ps1 -Json
-agent_scripts:
-  sh: ../../scripts/bash/update-agent-context.sh __AGENT__
-  ps: ../../scripts/powershell/update-agent-context.ps1 -AgentType __AGENT__
 ---
 
 Run {SCRIPT}
-Then {AGENT_SCRIPT}
 Agent __AGENT__
 """
         )
@@ -1360,11 +1394,82 @@ Agent __AGENT__
 
         content = skill_file.read_text()
         assert "{SCRIPT}" not in content
-        assert "{AGENT_SCRIPT}" not in content
         assert "__AGENT__" not in content
         assert "{ARGS}" not in content
         assert '.specify/scripts/bash/setup-plan.sh --json "$ARGUMENTS"' in content
-        assert ".specify/scripts/bash/update-agent-context.sh codex" in content
+
+    @pytest.mark.parametrize("agent_name,skills_path", [
+        ("codex", ".agents/skills"),
+        ("kimi", ".kimi/skills"),
+        ("claude", ".claude/skills"),
+        ("cursor-agent", ".cursor/skills"),
+        ("trae", ".trae/skills"),
+        ("agy", ".agents/skills"),
+    ])
+    def test_all_skill_agents_register_commands_with_resolved_placeholders(
+        self, project_dir, temp_dir, agent_name, skills_path
+    ):
+        """All SKILL.md agents must produce fully resolved SKILL.md files when commands are registered."""
+        import yaml
+
+        ext_dir = temp_dir / f"ext-{agent_name}"
+        ext_dir.mkdir()
+        (ext_dir / "commands").mkdir()
+
+        manifest_data = {
+            "schema_version": "1.0",
+            "extension": {
+                "id": f"ext-{agent_name}",
+                "name": "Scripted Extension",
+                "version": "1.0.0",
+                "description": "Test",
+            },
+            "requires": {"speckit_version": ">=0.1.0"},
+            "provides": {
+                "commands": [
+                    {
+                        "name": f"speckit.ext-{agent_name}.run",
+                        "file": "commands/run.md",
+                        "description": "Scripted command",
+                    }
+                ]
+            },
+        }
+        with open(ext_dir / "extension.yml", "w") as f:
+            yaml.dump(manifest_data, f)
+
+        (ext_dir / "commands" / "run.md").write_text(
+            "---\n"
+            "description: Scripted command\n"
+            "scripts:\n"
+            '  sh: ../../scripts/bash/setup-plan.sh --json "{ARGS}"\n'
+            "---\n\n"
+            "Run {SCRIPT}\n"
+            "Agent is __AGENT__.\n"
+        )
+
+        init_options = project_dir / ".specify" / "init-options.json"
+        init_options.parent.mkdir(parents=True, exist_ok=True)
+        init_options.write_text(f'{{"ai":"{agent_name}","script":"sh"}}')
+
+        skills_dir = project_dir
+        for part in skills_path.split("/"):
+            skills_dir = skills_dir / part
+        skills_dir.mkdir(parents=True)
+
+        manifest = ExtensionManifest(ext_dir / "extension.yml")
+        registrar = CommandRegistrar()
+        registrar.register_commands_for_agent(agent_name, manifest, ext_dir, project_dir)
+
+        skill_dir_name = f"speckit-ext-{agent_name}-run"
+        skill_file = skills_dir / skill_dir_name / "SKILL.md"
+        assert skill_file.exists(), f"SKILL.md not created for {agent_name}"
+
+        content = skill_file.read_text()
+        assert "{SCRIPT}" not in content, f"{{SCRIPT}} not resolved for {agent_name}"
+        assert "__AGENT__" not in content, f"__AGENT__ not resolved for {agent_name}"
+        assert "{ARGS}" not in content, f"{{ARGS}} not resolved for {agent_name}"
+        assert '.specify/scripts/bash/setup-plan.sh' in content
 
     def test_codex_skill_alias_frontmatter_matches_alias_name(self, project_dir, temp_dir):
         """Codex alias skills should render their own matching `name:` frontmatter."""
@@ -1450,12 +1555,9 @@ description: "Fallback scripted command"
 scripts:
   sh: ../../scripts/bash/setup-plan.sh --json "{ARGS}"
   ps: ../../scripts/powershell/setup-plan.ps1 -Json
-agent_scripts:
-  sh: ../../scripts/bash/update-agent-context.sh __AGENT__
 ---
 
 Run {SCRIPT}
-Then {AGENT_SCRIPT}
 """
         )
 
@@ -1472,9 +1574,10 @@ Then {AGENT_SCRIPT}
 
         content = skill_file.read_text()
         assert "{SCRIPT}" not in content
-        assert "{AGENT_SCRIPT}" not in content
-        assert '.specify/scripts/bash/setup-plan.sh --json "$ARGUMENTS"' in content
-        assert ".specify/scripts/bash/update-agent-context.sh codex" in content
+        if platform.system().lower().startswith("win"):
+            assert ".specify/scripts/powershell/setup-plan.ps1 -Json" in content
+        else:
+            assert '.specify/scripts/bash/setup-plan.sh --json "$ARGUMENTS"' in content
 
     def test_codex_skill_registration_handles_non_dict_init_options(
         self, project_dir, temp_dir
@@ -1571,13 +1674,9 @@ description: "Windows fallback scripted command"
 scripts:
   sh: ../../scripts/bash/setup-plan.sh --json "{ARGS}"
   ps: ../../scripts/powershell/setup-plan.ps1 -Json
-agent_scripts:
-  sh: ../../scripts/bash/update-agent-context.sh __AGENT__
-  ps: ../../scripts/powershell/update-agent-context.ps1 -AgentType __AGENT__
 ---
 
 Run {SCRIPT}
-Then {AGENT_SCRIPT}
 """
         )
 
@@ -1593,7 +1692,6 @@ Then {AGENT_SCRIPT}
 
         content = skill_file.read_text()
         assert ".specify/scripts/powershell/setup-plan.ps1 -Json" in content
-        assert ".specify/scripts/powershell/update-agent-context.ps1 -AgentType codex" in content
         assert ".specify/scripts/bash/setup-plan.sh" not in content
 
     def test_register_commands_for_copilot(self, extension_dir, project_dir):
@@ -1748,7 +1846,7 @@ Then {AGENT_SCRIPT}
         registrar = CommandRegistrar()
         from specify_cli.extensions import ExtensionManifest
         manifest = ExtensionManifest(ext_dir / "extension.yml")
-        registered = registrar.register_commands_for_agent("codex", manifest, ext_dir, project_dir)
+        registrar.register_commands_for_agent("codex", manifest, ext_dir, project_dir)
 
         skill_subdir = skills_dir / "speckit-cleanup-ext-run"
         assert skill_subdir.exists(), "Skill subdirectory should exist after registration"
@@ -2347,6 +2445,182 @@ class TestExtensionCatalog:
         assert not catalog.cache_file.exists()
         assert not catalog.cache_metadata_file.exists()
 
+    # --- _make_request / GitHub auth ---
+
+    def _make_catalog(self, temp_dir):
+        project_dir = temp_dir / "project"
+        project_dir.mkdir()
+        (project_dir / ".specify").mkdir()
+        return ExtensionCatalog(project_dir)
+
+    def _inject_github_config(self, monkeypatch, token_env="GH_TOKEN"):
+        from tests.auth_helpers import inject_github_config
+        inject_github_config(monkeypatch, token_env)
+
+    def test_make_request_no_token_no_auth_header(self, temp_dir, monkeypatch):
+        """Without a token, requests carry no Authorization header."""
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://raw.githubusercontent.com/org/repo/main/catalog.json")
+        assert "Authorization" not in req.headers
+
+    def test_make_request_whitespace_only_github_token_ignored(self, temp_dir, monkeypatch):
+        """A whitespace-only GITHUB_TOKEN is treated as unset."""
+        monkeypatch.setenv("GITHUB_TOKEN", "   ")
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://raw.githubusercontent.com/org/repo/main/catalog.json")
+        assert "Authorization" not in req.headers
+
+    def test_make_request_whitespace_github_token_falls_back_to_gh_token(self, temp_dir, monkeypatch):
+        """When GITHUB_TOKEN is whitespace-only, GH_TOKEN is used as fallback."""
+        monkeypatch.setenv("GITHUB_TOKEN", "   ")
+        monkeypatch.setenv("GH_TOKEN", "ghp_fallback")
+        self._inject_github_config(monkeypatch, token_env="GH_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://raw.githubusercontent.com/org/repo/main/catalog.json")
+        assert req.get_header("Authorization") == "Bearer ghp_fallback"
+
+    def test_make_request_github_token_added_for_raw_githubusercontent(self, temp_dir, monkeypatch):
+        """GITHUB_TOKEN is attached for raw.githubusercontent.com URLs."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken")
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        self._inject_github_config(monkeypatch, token_env="GITHUB_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://raw.githubusercontent.com/org/repo/main/catalog.json")
+        assert req.get_header("Authorization") == "Bearer ghp_testtoken"
+
+    def test_make_request_gh_token_fallback(self, temp_dir, monkeypatch):
+        """GH_TOKEN is used when GITHUB_TOKEN is absent."""
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.setenv("GH_TOKEN", "ghp_ghtoken")
+        self._inject_github_config(monkeypatch, token_env="GH_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://github.com/org/repo/releases/download/v1/ext.zip")
+        assert req.get_header("Authorization") == "Bearer ghp_ghtoken"
+
+    def test_make_request_gh_token_takes_precedence_over_github_token(self, temp_dir, monkeypatch):
+        """When auth.json uses GH_TOKEN, that token is used regardless of GITHUB_TOKEN."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_secondary")
+        monkeypatch.setenv("GH_TOKEN", "ghp_primary")
+        self._inject_github_config(monkeypatch, token_env="GH_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://api.github.com/repos/org/repo")
+        assert req.get_header("Authorization") == "Bearer ghp_primary"
+
+    def test_make_request_no_auth_for_non_matching_host(self, temp_dir, monkeypatch):
+        """Auth is NOT attached to hosts not listed in auth.json."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken")
+        self._inject_github_config(monkeypatch, token_env="GITHUB_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://internal.example.com/catalog.json")
+        assert "Authorization" not in req.headers
+
+    def test_make_request_no_auth_when_no_config(self, temp_dir, monkeypatch):
+        """No auth header when no auth.json config exists."""
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://github.com/org/repo/releases/download/v1/ext.zip")
+        assert "Authorization" not in req.headers
+
+    def test_make_request_token_added_for_api_github_com(self, temp_dir, monkeypatch):
+        """GITHUB_TOKEN is attached for api.github.com URLs."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken")
+        self._inject_github_config(monkeypatch, token_env="GITHUB_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://api.github.com/repos/org/repo/releases/assets/1")
+        assert req.get_header("Authorization") == "Bearer ghp_testtoken"
+
+    def test_make_request_token_added_for_codeload_github_com(self, temp_dir, monkeypatch):
+        """GITHUB_TOKEN is attached for codeload.github.com URLs (GitHub archive redirects)."""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken")
+        self._inject_github_config(monkeypatch, token_env="GITHUB_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+        req = catalog._make_request("https://codeload.github.com/org/repo/zip/refs/tags/v1.0.0")
+        assert req.get_header("Authorization") == "Bearer ghp_testtoken"
+
+    def test_fetch_single_catalog_sends_auth_header(self, temp_dir, monkeypatch):
+        """_fetch_single_catalog passes Authorization header when a provider is configured."""
+        from unittest.mock import patch, MagicMock
+
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken")
+        self._inject_github_config(monkeypatch, token_env="GITHUB_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+
+        catalog_data = {"schema_version": "1.0", "extensions": {}}
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(catalog_data).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.geturl.return_value = "https://raw.githubusercontent.com/org/repo/main/catalog.json"
+
+        captured = {}
+        mock_opener = MagicMock()
+
+        def fake_open(req, timeout=None):
+            captured["req"] = req
+            return mock_response
+
+        mock_opener.open.side_effect = fake_open
+
+        entry = CatalogEntry(
+            url="https://raw.githubusercontent.com/org/repo/main/catalog.json",
+            name="private",
+            priority=1,
+            install_allowed=True,
+        )
+
+        with patch("specify_cli.authentication.http.urllib.request.build_opener", return_value=mock_opener):
+            catalog._fetch_single_catalog(entry, force_refresh=True)
+
+        assert captured["req"].get_header("Authorization") == "Bearer ghp_testtoken"
+
+    def test_download_extension_sends_auth_header(self, temp_dir, monkeypatch):
+        """download_extension passes Authorization header when a provider is configured."""
+        from unittest.mock import patch, MagicMock
+        import zipfile
+        import io
+
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_testtoken")
+        self._inject_github_config(monkeypatch, token_env="GITHUB_TOKEN")
+        catalog = self._make_catalog(temp_dir)
+
+        # Build a minimal valid ZIP in memory
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w") as zf:
+            zf.writestr("extension.yml", "id: test-ext\nname: Test\nversion: 1.0.0\n")
+        zip_bytes = zip_buf.getvalue()
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = zip_bytes
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        captured = {}
+        mock_opener = MagicMock()
+
+        def fake_open(req, timeout=None):
+            captured["req"] = req
+            return mock_response
+
+        mock_opener.open.side_effect = fake_open
+
+        ext_info = {
+            "id": "test-ext",
+            "name": "Test Extension",
+            "version": "1.0.0",
+            "download_url": "https://github.com/org/repo/releases/download/v1/test-ext.zip",
+        }
+
+        with patch.object(catalog, "get_extension_info", return_value=ext_info), \
+             patch("specify_cli.authentication.http.urllib.request.build_opener", return_value=mock_opener):
+            catalog.download_extension("test-ext", target_dir=temp_dir)
+
+        assert captured["req"].get_header("Authorization") == "Bearer ghp_testtoken"
+
+
 
 # ===== CatalogEntry Tests =====
 
@@ -2580,6 +2854,110 @@ class TestCatalogStack:
 
         assert len(entries) == 1
         assert entries[0].url == "http://localhost:8000/catalog.json"
+
+    @pytest.mark.parametrize(
+        "config_content", ["[]\n", "false\n", "0\n", "''\n", "- item\n"]
+    )
+    def test_load_catalog_config_rejects_non_mapping_roots(
+        self, temp_dir, config_content
+    ):
+        """Malformed roots raise ValidationError, not fallback or AttributeError."""
+        project_dir = self._make_project(temp_dir)
+        config_path = project_dir / ".specify" / "extension-catalogs.yml"
+        config_path.write_text(config_content, encoding="utf-8")
+
+        catalog = ExtensionCatalog(project_dir)
+
+        with pytest.raises(
+            ValidationError, match="expected a YAML mapping at the root"
+        ) as exc_info:
+            catalog.get_active_catalogs()
+        assert str(config_path) in str(exc_info.value)
+
+    def test_load_catalog_config_rejects_boolean_priority(self, temp_dir):
+        """Boolean priorities are rejected instead of being coerced to 1 or 0."""
+        import yaml as yaml_module
+
+        project_dir = self._make_project(temp_dir)
+        config_path = project_dir / ".specify" / "extension-catalogs.yml"
+        config_path.write_text(
+            yaml_module.dump(
+                {
+                    "catalogs": [
+                        {
+                            "name": "bad-priority",
+                            "url": "https://example.com/catalog.json",
+                            "priority": True,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        catalog = ExtensionCatalog(project_dir)
+
+        with pytest.raises(
+            ValidationError, match="Invalid priority|expected integer"
+        ) as exc_info:
+            catalog.get_active_catalogs()
+        assert str(config_path) in str(exc_info.value)
+
+    def test_load_catalog_config_defaults_blank_names(self, temp_dir):
+        """Blank and null names normalize by valid catalog order."""
+        import yaml as yaml_module
+
+        project_dir = self._make_project(temp_dir)
+        config_path = project_dir / ".specify" / "extension-catalogs.yml"
+        config_path.write_text(
+            yaml_module.dump(
+                {
+                    "catalogs": [
+                        {"name": "skipped", "url": "   "},
+                        {"name": None, "url": "https://one.example.com/catalog.json"},
+                        {"name": "   ", "url": "https://two.example.com/catalog.json"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        catalog = ExtensionCatalog(project_dir)
+
+        assert [entry.name for entry in catalog.get_active_catalogs()] == [
+            "catalog-1",
+            "catalog-2",
+        ]
+
+    @pytest.mark.parametrize(
+        ("url", "expected_detail"),
+        [
+            ("relative/catalog.json", "HTTPS"),
+            ("https:///no-host", "valid URL with a host"),
+        ],
+    )
+    def test_load_catalog_config_invalid_url_includes_context(
+        self, temp_dir, url, expected_detail
+    ):
+        """Invalid catalog URLs include the config path and entry index."""
+        import yaml as yaml_module
+
+        project_dir = self._make_project(temp_dir)
+        config_path = project_dir / ".specify" / "extension-catalogs.yml"
+        config_path.write_text(
+            yaml_module.dump({"catalogs": [{"name": "bad", "url": url}]}),
+            encoding="utf-8",
+        )
+
+        catalog = ExtensionCatalog(project_dir)
+
+        with pytest.raises(ValidationError) as exc_info:
+            catalog.get_active_catalogs()
+        message = str(exc_info.value)
+        assert "Invalid catalog URL" in message
+        assert str(config_path) in message
+        assert "index 0" in message
+        assert expected_detail in message
 
     # --- Merge conflict resolution ---
 

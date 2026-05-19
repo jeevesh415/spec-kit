@@ -11,7 +11,7 @@ These are one time installations required to be able to test your changes locall
 1. Install [Python 3.11+](https://www.python.org/downloads/)
 1. Install [uv](https://docs.astral.sh/uv/) for package management
 1. Install [Git](https://git-scm.com/downloads)
-1. Have an [AI coding agent available](README.md#-supported-ai-agents)
+1. Have an [AI coding agent available](README.md#-supported-ai-coding-agent-integrations)
 
 <details>
 <summary><b>💡 Hint if you are using <code>VSCode</code> or <code>GitHub Codespaces</code> as your IDE</b></summary>
@@ -94,7 +94,7 @@ uv pip install -e .
 # Ensure the `specify` binary in this environment points at your working tree so the agent runs the branch you're testing.
 
 # Initialize a test project using your local changes
-uv run specify init <temp-dir>/speckit-test --ai <agent> --offline
+uv run specify init <temp-dir>/speckit-test --integration <agent>
 cd <temp-dir>/speckit-test
 
 # Open in your agent
@@ -102,7 +102,7 @@ cd <temp-dir>/speckit-test
 
 #### Manual testing process
 
-Any change that affects a slash command's behavior requires manually testing that command through an AI agent and submitting results with the PR.
+Any change that affects a slash command's behavior requires manually testing that command through a coding agent and submitting results with the PR.
 
 1. **Identify affected commands** — use the [prompt below](#determining-which-tests-to-run) to have your agent analyze your changed files and determine which commands need testing.
 2. **Set up a test project** — scaffold from your local branch (see [Testing setup](#testing-setup)).
